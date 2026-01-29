@@ -27,8 +27,8 @@ async function getEmbedding(text: string) {
   })
   
   if (!response.ok) throw new Error('Embedding creation failed')
-  const data = await response.json()
-  return data.data[0].embedding
+  const data = await response.json() as any;
+  return data.data[0].embedding;
 }
 
 // --- API REITTI ---
