@@ -1,77 +1,63 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-// Alustetaan Supabase-asiakas service_role-avaimella, jotta pääsemme käsiksi vektoreihin
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY!
 
-// --- APUFUNKTIOT ---
-
-/**
- * Muuttaa tekstin vektoriksi (Embedding)
- */
 async function getEmbedding(text: string) {
+  if (!text) throw new Error('Input missing');
   const response = await fetch('https://api.mistral.ai/v1/embeddings', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${MISTRAL_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: 'mistral-embed',
-      input: [text.replace(/\n/g, ' ')]
-    })
+    body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
   })
-  
-  if (!response.ok) throw new Error('Embedding creation failed')
-  const data = await response.json() as any;
+  const data = await response.json();
   return data.data[0].embedding;
 }
 
-// --- API REITTI ---
-
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json()
-    const userQuestion = messages[messages.length - 1].content
+    const { messages: rawMessages } = await req.json();
 
-    // 1. Luodaan kysymyksestä vektori
-    const queryEmbedding = await getEmbedding(userQuestion)
+    const messages = rawMessages.map((m: any) => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : 
+               (Array.isArray(m.parts) ? m.parts.find((p: any) => p.type === 'text')?.text || "" : "")
+    }));
 
-    // 2. Etsitään Supabasesta matemaattisesti lähimmät tekstinpätkät
-    const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
+    const userQuestion = messages[messages.length - 1]?.content;
+    const queryEmbedding = await getEmbedding(userQuestion);
+
+    // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
+    const { data: matchedSections } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
-      match_threshold: 0.2, // Säädä tätä (0.1 = hyvin löysä, 0.8 = tiukka)
-      match_count: 10        // Kuinka monta pätkää annetaan tekoälylle
-    })
+      match_threshold: 0.15, //
+      match_count: 8         //
+    });
 
-    if (matchError) throw matchError
+    const contextText = matchedSections?.map((s: any) => `[Lähde: ${s.title}]\n${s.content}`).join('\n\n---\n\n');
 
-    // 3. Koostetaan löydetty teksti kontekstiksi
-    const contextText = matchedSections
-      ?.map((s: any) => `[Lähde: ${s.title}]\n${s.content}`)
-      .join('\n\n---\n\n')
-
-    // 4. Valmistellaan ohjeet Mistralille
+    // 3. SYSTEM PROMPT - Äly-Napin aivot ja säännöt palautettu
     const systemPrompt = `
-Olet Äly-Nappi, avulias ja empaattinenarkistoavustaja. Tehtäväsi on vastata käyttäjän kysymyksiin annettujen Nappi-lehden tekstiotteiden perusteella.
+Olet Äly-Nappi, avulias ja empaattinen arkistoavustaja. Tehtäväsi on vastata käyttäjän kysymyksiin annettujen Nappi-lehden tekstiotteiden perusteella.
 
 SÄÄNNÖT:
-  - Käytä vain annettua kontekstia.
-  - Vastaa aina kysymyksiin sillä kielellä millä ne on kirjoitettu. Mainitse kuintekin jos olet kääntänyt vastauksen kysytylle kiele 
-  - Pidä vastaukset tiiviinä ja ytimekkäinä 
-  - Käytä tarvittaessa selkeitä listoja ja lihavointeja (**tärkeä termi**).
-  - Jos vastaus löytyy arkistosta, mainitse vastauksessa vuosi ja lehden numero.
-  - Jos et löydä tietoa, sano se suoraan äläkä keksi omia, sano esimerkiksi : "Pahoittelut, tästä aiheesta ei löytynyt mainintoja."
+  - Käytä vain annettua arkistomateriaalia vastauksen pohjana.
+  - Vastaa perusteellisesti ja kattavasti.
+  - Käytä selkeitä listoja ja lihavointeja (**tärkeä termi**).
+  - Mainitse vastauksessa aina lähteenä käytetyn lehden numero ja vuosi.
+  - Jos et löydä tietoa, sano: "Pahoittelut, tästä aiheesta ei löytynyt mainintoja arkistosta."
 
 LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
-`
+`;
 
-    // 5. Kutsutaan Mistral Chat API:a striimauksella
+    // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -79,26 +65,74 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'mistral-large-latest',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...messages
-        ],
-        max_tokens: 500,
-        stream: true, // Tämä mahdollistaa tekstin "valumisen" ruudulle
+        model: 'mistral-small-latest', // vaihda malli mistral-large-latest
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        max_tokens: 500,    //nosta tätä tuotannossa 1000
+        temperature: 0.7,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        stop: null,
+        stream: true,
       })
-    })
+    });
 
-    // 6. Palautetaan vastaus suoraan striiminä frontendille
-    return new Response(response.body, {
-      headers: { 
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        if (!reader) return controller.close();
+
+        try {
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6).trim();
+                if (data === '[DONE]') break;
+                try {
+                  const json = JSON.parse(data);
+                  const text = json.choices?.[0]?.delta?.content;
+                  if (text) controller.enqueue(encoder.encode(text));
+                } catch (e) {}
+              }
+            }
+          }
+          if (buffer && buffer.startsWith('data: ')) {
+             try {
+               const data = buffer.slice(6).trim();
+               if (data !== '[DONE]') {
+                 const json = JSON.parse(data);
+                 const text = json.choices?.[0]?.delta?.content;
+                 if (text) controller.enqueue(encoder.encode(text));
+               }
+             } catch (e) {}
+          }
+        } catch (e) {
+          controller.error(e);
+        } finally {
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-      }
-    })
+        'Connection': 'keep-alive',
+      },
+    });
 
   } catch (error: any) {
-    console.error('Chat API Error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

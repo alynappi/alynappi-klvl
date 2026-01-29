@@ -1,19 +1,23 @@
+import "./globals.css";
+import { Montserrat } from "next/font/google";
 import type { Metadata } from "next";
-import "./globals.css"; // Tämä on ainoa Tailwind-viittaus, joka täällä saa olla
+
+const montserrat = Montserrat({ 
+  subsets: ["latin"],
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: "Äly-Nappi Arkisto",
   description: "Nappi-lehden tekoälyarkisto",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fi">
-      <body>{children}</body>
+    <html lang="fi" className={montserrat.className}>
+      <body className="antialiased">
+        {children}
+      </body>
     </html>
   );
 }

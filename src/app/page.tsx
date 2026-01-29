@@ -1,150 +1,95 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import ReactMarkdown from 'react-markdown'
-
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
+import { useChat } from '@ai-sdk/react'
+import { TextStreamChatTransport, isTextUIPart } from 'ai'
+import { useEffect, useRef, useState } from 'react'
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  const { messages, sendMessage, status } = useChat({
+    transport: new TextStreamChatTransport({ api: '/api/chat' }),
+  })
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    scrollToBottom()
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
   }, [messages])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
-
-    const userMessage: Message = { role: 'user', content: input }
-    setMessages(prev => [...prev, userMessage])
-    setInput('')
-    setIsLoading(true)
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...messages, userMessage] }),
-      })
-
-      if (!response.ok) throw new Error('Haku epäonnistui')
-
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      let assistantContent = ''
-
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }])
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          
-          const chunk = decoder.decode(value)
-          const lines = chunk.split('\n')
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6)
-              if (data === '[DONE]') break
-              try {
-                const json = JSON.parse(data)
-                const content = json.choices[0]?.delta?.content || ''
-                assistantContent += content
-                setMessages(prev => {
-                  const newMessages = [...prev]
-                  newMessages[newMessages.length - 1].content = assistantContent
-                  return newMessages
-                })
-              } catch (e) {
-                // Ohitetaan epätäydelliset JSON-pätkät
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Virhe:', error)
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Haku epäonnistui. Tarkista yhteys.' }])
-    } finally {
-      setIsLoading(false)
+    if (input.trim() && status !== 'streaming') {
+      sendMessage({ text: input })
+      setInput('')
     }
   }
 
+  const getMessageText = (message: typeof messages[0]) => {
+    return message.parts
+      .filter(isTextUIPart)
+      .map(part => part.text)
+      .join('')
+  }
+
   return (
-    <div className="flex h-screen flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b bg-white dark:bg-zinc-900 px-6 py-4 shadow-sm">
-        <h1 className="text-xl font-bold tracking-tight">Äly-Nappi Arkisto</h1>
-        <div className="text-xs font-medium text-zinc-500 uppercase tracking-widest">Mistral AI v1.0</div>
+    <main className="flex flex-col h-screen max-h-screen bg-slate-50 overflow-hidden">
+      {/* YLÄPALKKI */}
+      <header className="bg-klvl-blue text-white p-4 shadow-lg shrink-0 z-10">
+        <div className="max-w-2xl mx-auto flex items-center gap-3">
+          <div className="w-10 h-10 bg-klvl-yellow rounded-full flex items-center justify-center text-klvl-blue font-bold text-xl shadow-inner">
+            Ä
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">Äly-Nappi Arkisto</h1>
+            <p className="text-[10px] uppercase tracking-widest opacity-80">KLVL ry:n tekoälyavustaja</p>
+          </div>
+        </div>
       </header>
 
-      {/* Chat Area */}
-      <main className="flex-1 overflow-y-auto p-4 md:p-8">
-        <div className="mx-auto max-w-3xl space-y-6">
+      {/* VIESTIALUE */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="max-w-2xl mx-auto w-full">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="mb-4 rounded-full bg-zinc-200 dark:bg-zinc-800 p-4">🤖</div>
-              <h2 className="text-lg font-semibold">Tervetuloa arkistoon</h2>
-              <p className="text-sm text-zinc-500 max-w-xs">Voit kysyä mitä tahansa vuoden 2025 lehdistä. Etsin vastaukset suoraan tekstistä.</p>
+            <div className="text-center py-16 px-6 bg-white rounded-3xl shadow-sm border border-slate-100 mt-10">
+              <h2 className="text-klvl-blue text-2xl font-bold mb-4">Hei! Mitä haluaisit tietää Nappi-lehdistä?</h2>
+              <p className="text-slate-600 italic">Etsin vastaukset suoraan arkistosta ja kerron lähteet.</p>
             </div>
           )}
 
-          {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`rounded-2xl px-6 py-4 shadow-sm max-w-[90%] ${
+          {messages.map((m) => (
+            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+              <div className={`max-w-[85%] p-4 rounded-2xl shadow-sm leading-relaxed ${
                 m.role === 'user' 
-                  ? 'bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900' 
-                  : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800'
+                  ? 'bg-klvl-blue text-white rounded-tr-none' 
+                  : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
               }`}>
-                {/* TÄSSÄ ON MUUTETTU KOHTA: ReactMarkdown hoitaa muotoilun */}
-                <div className="prose prose-sm md:prose-base dark:prose-invert max-w-none">
-                  <ReactMarkdown
-                    components={{
-                      // Tehdään linkeistä klikattavia ja sinisiä
-                      a: ({ node, ...props }) => (
-                        <a {...props} className="text-blue-600 font-bold underline hover:text-blue-800" target="_blank" rel="noopener noreferrer" />
-                      )
-                    }}
-                  >
-                    {m.content}
-                  </ReactMarkdown>
-                </div>
+                <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
               </div>
             </div>
           ))}
-          <div ref={messagesEndRef} />
         </div>
-      </main>
+      </div>
 
-      {/* Input Form */}
-      <footer className="border-t bg-white dark:bg-zinc-900 p-4">
-        <form onSubmit={handleSubmit} className="mx-auto max-w-3xl flex gap-3">
+      {/* SYÖTTÖKENTTÄ */}
+      <div className="p-4 bg-white border-t border-slate-200 shrink-0">
+        <form onSubmit={handleSubmit} className="max-w-2xl mx-auto flex gap-2">
           <input
-            className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-500 transition-all"
+            className="flex-1 p-4 bg-slate-100 rounded-2xl focus:ring-2 focus:ring-klvl-blue outline-none text-slate-800 transition-all shadow-inner"
             value={input}
-            placeholder="Mitä Nappi-lehdessä 1/2025 sanottiin..."
+            placeholder="Kysy jotain Napista..."
             onChange={(e) => setInput(e.target.value)}
+            disabled={status === 'streaming'}
           />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            className="rounded-xl bg-zinc-900 dark:bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-50 dark:text-zinc-900 hover:opacity-90 disabled:opacity-50 transition-all"
+          <button 
+            type="submit" 
+            disabled={status === 'streaming' || !input.trim()}
+            className="px-6 bg-klvl-yellow hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed text-klvl-blue font-bold rounded-2xl transition-all shadow-md active:scale-95"
           >
-            {isLoading ? 'Etsitään...' : 'Kysy'}
+            {status === 'streaming' ? '...' : 'Kysy'}
           </button>
         </form>
-      </footer>
-    </div>
+      </div>
+    </main>
   )
 }
