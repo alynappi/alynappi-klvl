@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
+// Allow streaming responses up to 30 seconds
+export const maxDuration = 30;
+export const runtime = 'nodejs';
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
@@ -16,13 +20,28 @@ async function getEmbedding(text: string) {
     },
     body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
   })
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Embedding API error: ${response.status} - ${errorText}`);
+  }
+  
   const data = await response.json();
+  if (!data.data || !data.data[0] || !data.data[0].embedding) {
+    throw new Error('Invalid embedding response format');
+  }
+  
   return data.data[0].embedding;
 }
 
 export async function POST(req: Request) {
   try {
-    const { messages: rawMessages } = await req.json();
+    const body = await req.json();
+    const { messages: rawMessages } = body;
+    
+    if (!rawMessages || !Array.isArray(rawMessages)) {
+      throw new Error('Invalid request: messages array is required');
+    }
 
     const messages = rawMessages.map((m: any) => ({
       role: m.role,
@@ -31,14 +50,24 @@ export async function POST(req: Request) {
     }));
 
     const userQuestion = messages[messages.length - 1]?.content;
+    
+    if (!userQuestion || !userQuestion.trim()) {
+      throw new Error('User question is empty');
+    }
+    
     const queryEmbedding = await getEmbedding(userQuestion);
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
-    const { data: matchedSections } = await supabase.rpc('match_documents', {
+    const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
-      match_threshold: 0.15, //
-      match_count: 8         //
+      match_threshold: 0.15,
+      match_count: 8
     });
+    
+    if (matchError) {
+      console.error('Supabase RPC error:', matchError);
+      throw new Error(`Database search failed: ${matchError.message}`);
+    }
 
     const contextText = matchedSections?.map((s: any) => `[Lähde: ${s.title}]\n${s.content}`).join('\n\n---\n\n');
 
@@ -70,53 +99,87 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         max_tokens: 500,    //nosta tätä tuotannossa 1000
         temperature: 0.7,
         top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-        stop: null,
         stream: true,
       })
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Mistral API error: ${response.status} - ${errorText}`);
+    }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
-        if (!reader) return controller.close();
+        if (!reader) {
+          controller.close();
+          return;
+        }
 
         try {
           let buffer = '';
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+          let done = false;
+          
+          while (!done) {
+            const result = await reader.read();
+            done = result.done;
             
-            buffer += decoder.decode(value, { stream: true });
+            if (result.value) {
+              // Decode with stream:true to handle partial UTF-8 sequences
+              buffer += decoder.decode(result.value, { stream: !done });
+            }
+            
+            // Process complete lines
             const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+            // Keep incomplete line in buffer
+            buffer = done ? '' : (lines.pop() || '');
             
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6).trim();
-                if (data === '[DONE]') break;
-                try {
-                  const json = JSON.parse(data);
-                  const text = json.choices?.[0]?.delta?.content;
-                  if (text) controller.enqueue(encoder.encode(text));
-                } catch (e) {}
+                if (data === '[DONE]') {
+                  done = true;
+                  break;
+                }
+                if (data) {
+                  try {
+                    const json = JSON.parse(data);
+                    const text = json.choices?.[0]?.delta?.content;
+                    if (text) {
+                      controller.enqueue(encoder.encode(text));
+                    }
+                  } catch (e) {
+                    // Skip invalid JSON lines
+                    console.error('Failed to parse JSON:', data, e);
+                  }
+                }
               }
             }
           }
-          if (buffer && buffer.startsWith('data: ')) {
-             try {
-               const data = buffer.slice(6).trim();
-               if (data !== '[DONE]') {
-                 const json = JSON.parse(data);
-                 const text = json.choices?.[0]?.delta?.content;
-                 if (text) controller.enqueue(encoder.encode(text));
-               }
-             } catch (e) {}
+          
+          // Flush any remaining buffer
+          if (buffer && buffer.trim()) {
+            if (buffer.startsWith('data: ')) {
+              const data = buffer.slice(6).trim();
+              if (data && data !== '[DONE]') {
+                try {
+                  const json = JSON.parse(data);
+                  const text = json.choices?.[0]?.delta?.content;
+                  if (text) {
+                    controller.enqueue(encoder.encode(text));
+                  }
+                } catch (e) {
+                  // Skip invalid JSON
+                }
+              }
+            }
           }
+          
+          // Stream complete
         } catch (e) {
+          console.error('Stream error:', e);
           controller.error(e);
         } finally {
           controller.close();
@@ -133,6 +196,11 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     });
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Chat API Error:', error);
+    const errorMessage = error?.message || 'Unknown error occurred';
+    return NextResponse.json({ 
+      error: errorMessage,
+      stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+    }, { status: 500 });
   }
 }
