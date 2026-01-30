@@ -3,6 +3,7 @@
 import { useChat } from '@ai-sdk/react'
 import { TextStreamChatTransport, isTextUIPart } from 'ai'
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 
 export default function ChatPage() {
   const [input, setInput] = useState('')
@@ -64,7 +65,13 @@ export default function ChatPage() {
                   ? 'bg-klvl-blue text-white rounded-tr-none' 
                   : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
               }`}>
-                <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
+                {m.role === 'user' ? (
+                  <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
+                ) : (
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown>{getMessageText(m)}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </div>
           ))}
