@@ -98,13 +98,22 @@ export default function ChatPage() {
       {/* VIESTIALUE */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         <div className="max-w-2xl mx-auto w-full">
-          {messages.length === 0 && (
-            <div className="text-center py-16 px-6 bg-white rounded-3xl shadow-sm border border-slate-100 mt-10">
-              <h2 className="text-klvl-blue text-2xl font-bold mb-4">Hei! Mitä haluaisit tietää Nappi-lehdistä?</h2>
-              <p className="text-slate-600 italic">Etsin vastaukset suoraan arkistosta ja kerron lähteet.</p>
-            </div>
-          )}
-
+        {messages.length === 0 && (
+  <div className="text-center py-16 px-6 bg-white rounded-3xl shadow-sm border border-slate-100 mt-10">
+    <h2 className="text-klvl-blue text-2xl font-bold mb-4">
+    Hei, olen ÄlyNappi, KLVL:n tekoälyavustaja
+    </h2>
+    <p className="text-slate-600 mb-6 max-w-md mx-auto">
+      Kysy vapaasti kuulovammaan, edunvalvontaan tai perheiden tukeen liittyvistä aiheista. 
+    </p>
+    <div className="flex flex-wrap justify-center gap-3 text-xs text-slate-500 italic">
+      <span>• Nappi-lehdet</span>
+      <span>• Tutkimukset</span>
+      <span>• Oppaat</span>
+      <span>• Verkkopalvelut, klvl.fi ja kuulovain.fi</span>
+    </div>
+  </div>
+)}
           <AnimatePresence>
             {messages.map((m) => (
               <motion.div
