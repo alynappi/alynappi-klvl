@@ -69,7 +69,42 @@ export async function POST(req: Request) {
       throw new Error(`Database search failed: ${matchError.message}`);
     }
 
-    const contextText = matchedSections?.map((s: any) => `[Lähde: ${s.title}]\n${s.content}`).join('\n\n---\n\n');
+    // Log first section to verify category is being returned
+    if (matchedSections && matchedSections.length > 0) {
+      const firstSection = matchedSections[0];
+      console.log('📋 First matched section sample:', {
+        id: firstSection.id,
+        title: firstSection.metadata?.title || firstSection.title,
+        category: firstSection.category,
+        page_number: firstSection.page_number,
+        similarity: firstSection.similarity,
+        hasContent: !!firstSection.content,
+        metadata: firstSection.metadata
+      });
+    }
+
+    // Format context with category and page number metadata
+    const contextText = matchedSections?.map((s: any) => {
+      const category = s.category || null;
+      const pageNumber = s.page_number || null;
+      // Extract title from metadata object (new RPC structure) or fallback to direct title field
+      const title = s.metadata?.title || s.title || '';
+      
+      // Log for debugging
+      if (!category) {
+        console.warn(`⚠️  Missing category for section: ${title} (section ID: ${s.id || 'unknown'})`);
+      }
+      
+      // Format: [Category] Title, s. X - Category is REQUIRED
+      // If category is missing, use a fallback but log it
+      const categoryLabel = category ? `[${category}]` : '[Kategoria puuttuu]';
+      let sourceLabel = `${categoryLabel} ${title}`;
+      if (pageNumber) {
+        sourceLabel += `, s. ${pageNumber}`;
+      }
+      
+      return `[Lähde: ${sourceLabel}]\n${s.content}`;
+    }).join('\n\n---\n\n');
 
     // 3. SYSTEM PROMPT - Äly-Napin aivot ja säännöt palautettu
     const systemPrompt = `
@@ -81,13 +116,35 @@ SÄÄNNÖT:
 - Käytä monipuolista Markdown-muotoilua: lihavoi avainsanat, käytä otsikoita ja jos vertailet asioita, suosi taulukoita.
 - Elävöitä tekstiä huumorilla tai mielenkiintoisilla nostoilla, kunhan ne perustuvat lähteisiin.
 - Käytä emojeita tuomaan ilmettä (esim. 📅 päivämääriin, 📍 paikkoihin, ❄️ talvitapahtumiin).
-- Mainitse AINA lähteenä käytetyn lehden numero ja vuosi selkeästi (esim. "Lähde: Nappi 2/2024").
+- LÄHTEIDEN MUOTOILU ON KRIITTINEN: Jokaisen lähteen maininnan TÄYTYY alkaa kategoriasta hakasulkeissa. Muoto: "[Kategoria] Nimi, s. X"
+- Kategoria on PAKOLLINEN osa lähdettä - ÄLÄ KOSKAAN jätä sitä pois!
+- Esimerkit oikeasta muodosta:
+  * "[Lehti] Nappi_1_2025, s. 12"
+  * "[Opas] Oppas_nimi, s. 5"
+  * "[Tutkimus] Tutkimus_nimi, s. 3"
+- Jos mainitset lähteen ilman kategoriaa, vastaus on VÄÄRÄ. Tarkista aina että kategoria on mukana!
 - Jos tietoa ei löydy, sano: "Etsin arkistosta ahkerasti, mutta tästä aiheesta ei valitettavasti löytynyt mainintoja. 🔍 Voinko auttaa jossain muussa?"
 - Vastaa lopuksi lyhyellä jatkokysymyksellä, joka innostaa käyttäjää tutkimaan aihetta lisää.
 - Vastauksen lopussa, ehdota 2-3 aiheeseen liittyvää jatkokysymystä muodossa [[Kysymys?]]
 - Jatkokysymysten tulee olla lyhyitä (max 60 merkkiä), selkeitä ja liittyä suoraan aiheeseen.
+- TAULUKOIDEN MUOTOILU - KRIITTINEN:
+  - Jätä AINA tyhjä rivi ennen taulukkoa ja sen jälkeen.
+  - Taulukon TÄYTYY koostua VÄHINTÄÄN kolmesta (3) erillisestä rivistä, joista JOKAINEN on OMA RIVINSÄ.
+  - RIVI 1: Otsikkorivi - esim. | Vertailukohde | Elina Pelkkikangas | Marika Enckell |
+  - RIVI 2: Erotinrivi - PAKOLLINEN, OMA RIVINSÄ, muoto: | :--- | :--- | :--- |
+  - RIVI 3+: Sisältörivit - esim. | Näkökulma | Vanhempien ääni | Kirjallisuuskatsaus |
+  - JOKAINEN rivi päättyy rivinvaihtoon (ENTER) - ÄLÄ KOSKAAN yhdistä kahta riviä!
+  - Erotinrivi on PAKOLLINEN ja sen on oltava TÄSMÄLLEEN muodossa | :--- | :--- | (vähintään kolme viivaa per sarake)
+  - ÄLÄ käytä tuplapystyviivoja (| |) rivien välissä - käytä aina rivinvaihtoa!
 
+OIKEA MUOTO (kopioi tarkasti - HUOM: jokainen rivi on oma rivinsä, YHDET pystyviivat | alussa):
 
+| Vertailukohde | Elina Pelkkikangas | Marika Enckell |
+| :--- | :--- | :--- |
+| Näkökulma | Vanhempien ääni ja kokemukset | Kirjallisuuskatsaus (2017-2022) |
+| Keskeinen fokus | Käytännön tuen tarve | Pedagoginen osaaminen |
+
+HUOM: Taulukon yllä ja alla on tyhjä rivi. Jokainen taulukon rivi on oma rivinsä. Käytä YHDET pystyviivat (|) rivin alussa, EI kahta (|).
 
 LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
@@ -101,10 +158,12 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'mistral-small-latest', // vaihda malli mistral-large-latest
+        model: 'mistral-large-latest', // vaihda malli mistral-large-latest
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
-        max_tokens: 500,    //nosta tätä tuotannossa 1000
+        max_tokens: 2000,    //nosta tätä tuotannossa 1000
         temperature: 0.7,
+        frequency_penalty: 0.2,
+        presence_penalty: 0.1,
         top_p: 1,
         stream: true,
       })

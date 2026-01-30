@@ -7,7 +7,7 @@
     "build": "npx next build",
     "start": "npx next start",
     "lint": "npx next lint",
-    "ingest": "npx tsx scripts/ingest-pdfs.ts"
+    "ingest": "npx tsx tietolahteet/scripts/ingest-pdfs.ts"
   },
   "dependencies": {
     "@ai-sdk/mistral": "^3.0.16",

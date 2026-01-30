@@ -1,7 +1,17 @@
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '../types/database.types'
 
-// Next.js automatically loads .env.local, no need for dotenv.config()
+// Load environment variables if not already loaded (for scripts outside Next.js)
+if (typeof window === 'undefined' && !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  try {
+    const dotenv = require('dotenv')
+    const path = require('path')
+    dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
+  } catch (e) {
+    // dotenv might not be available in all contexts, that's okay
+  }
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
