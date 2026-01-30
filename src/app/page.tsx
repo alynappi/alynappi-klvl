@@ -34,6 +34,52 @@ export default function ChatPage() {
       .join('')
   }
 
+  const parseQuickReplies = (text: string) => {
+    const quickReplyRegex = /\[\[(.+?)\]\]/g
+    const matches = [...text.matchAll(quickReplyRegex)]
+    const quickReplies = matches.map(match => match[1])
+    
+    // Remove [[...]] patterns first
+    let cleanText = text.replace(quickReplyRegex, '')
+    
+    // Remove all variations of prompt phrases (case insensitive)
+    const promptPhrases = [
+      /\n*\*\*Haluaisitko tietää aiheesta lisää[:\?]?\*\*\s*/gi,
+      /\n*Haluaisitko tietää aiheesta lisää[:\?]?\s*/gi,
+      /\n*\*\*Haluaisitko tietää lisää esimerkiksi[:\?]?\*\*\s*/gi,
+      /\n*Haluaisitko tietää lisää esimerkiksi[:\?]?\s*/gi,
+      /\n*\*\*Jatkokysymyksiä[:\?]?\*\*\s*/gi,
+      /\n*Jatkokysymyksiä[:\?]?\s*/gi,
+      /\n*\*\*Lisätietoja[:\?]?\*\*\s*/gi,
+      /\n*Lisätietoja[:\?]?\s*/gi,
+    ]
+    
+    promptPhrases.forEach(regex => {
+      cleanText = cleanText.replace(regex, '')
+    })
+    
+    // Remove empty bullet points (*, -, or •) and numbered lists
+    cleanText = cleanText.replace(/^\s*[-*•]\s*$/gm, '')
+    cleanText = cleanText.replace(/^\s*\d+\.\s*$/gm, '')
+    
+    // Remove lines that only contain whitespace
+    cleanText = cleanText.replace(/^\s*$/gm, '')
+    
+    // Remove multiple consecutive newlines (more than 2)
+    cleanText = cleanText.replace(/\n{3,}/g, '\n\n')
+    
+    // Remove trailing whitespace and newlines
+    cleanText = cleanText.trim()
+    
+    return { cleanText, quickReplies }
+  }
+
+  const handleQuickReply = (question: string) => {
+    if (status !== 'streaming') {
+      sendMessage({ text: question })
+    }
+  }
+
   return (
     <main className="flex flex-col h-screen max-h-screen bg-slate-50 overflow-hidden">
       {/* YLÄPALKKI */}
@@ -69,16 +115,42 @@ export default function ChatPage() {
                 transition={{ duration: 0.3 }}
                 className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}
               >
-                <div className={`max-w-[85%] p-4 rounded-2xl shadow-sm leading-relaxed ${
-                  m.role === 'user' 
-                    ? 'bg-klvl-blue text-white rounded-tr-none' 
-                    : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
-                }`}>
-                  {m.role === 'user' ? (
-                    <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
-                  ) : (
-                    <div className="prose prose-sm max-w-none">
-                      <ReactMarkdown>{getMessageText(m)}</ReactMarkdown>
+                <div className="max-w-[85%]">
+                  <div className={`p-4 rounded-2xl shadow-sm leading-relaxed ${
+                    m.role === 'user' 
+                      ? 'bg-klvl-blue text-white rounded-tr-none' 
+                      : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
+                  }`}>
+                    {m.role === 'user' ? (
+                      <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
+                    ) : (
+                      <div className="prose prose-sm max-w-none">
+                        <ReactMarkdown>{parseQuickReplies(getMessageText(m)).cleanText}</ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Quick Reply Buttons */}
+                  {m.role === 'assistant' && parseQuickReplies(getMessageText(m)).quickReplies.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-xs text-slate-500 mb-2 font-medium">Haluaisitko tietää aiheesta lisää?</p>
+                      <div className="flex flex-wrap gap-2">
+                        {parseQuickReplies(getMessageText(m)).quickReplies.map((reply, idx) => (
+                          <motion.button
+                            key={idx}
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.2, delay: idx * 0.1 }}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => handleQuickReply(reply)}
+                            disabled={status === 'streaming'}
+                            className="px-3 py-2 text-sm bg-slate-100 hover:bg-klvl-yellow hover:text-klvl-blue text-slate-700 rounded-xl border border-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {reply}
+                          </motion.button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
