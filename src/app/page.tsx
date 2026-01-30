@@ -4,6 +4,7 @@ import { useChat } from '@ai-sdk/react'
 import { TextStreamChatTransport, isTextUIPart } from 'ai'
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { motion, AnimatePresence } from 'framer-motion'
 
 export default function ChatPage() {
   const [input, setInput] = useState('')
@@ -58,23 +59,60 @@ export default function ChatPage() {
             </div>
           )}
 
-          {messages.map((m) => (
-            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-              <div className={`max-w-[85%] p-4 rounded-2xl shadow-sm leading-relaxed ${
-                m.role === 'user' 
-                  ? 'bg-klvl-blue text-white rounded-tr-none' 
-                  : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
-              }`}>
-                {m.role === 'user' ? (
-                  <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
-                ) : (
-                  <div className="prose prose-sm max-w-none">
-                    <ReactMarkdown>{getMessageText(m)}</ReactMarkdown>
-                  </div>
-                )}
+          <AnimatePresence>
+            {messages.map((m) => (
+              <motion.div
+                key={m.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}
+              >
+                <div className={`max-w-[85%] p-4 rounded-2xl shadow-sm leading-relaxed ${
+                  m.role === 'user' 
+                    ? 'bg-klvl-blue text-white rounded-tr-none' 
+                    : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
+                }`}>
+                  {m.role === 'user' ? (
+                    <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
+                  ) : (
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown>{getMessageText(m)}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+          
+          {status === 'streaming' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex justify-start mb-4"
+            >
+              <div className="max-w-[85%] p-4 rounded-2xl shadow-sm bg-white text-slate-800 rounded-tl-none border border-slate-200">
+                <div className="flex items-center gap-1">
+                  <motion.span
+                    animate={{ opacity: [0.3, 1, 0.3] }}
+                    transition={{ duration: 1.4, repeat: Infinity, delay: 0 }}
+                    className="w-2 h-2 bg-slate-400 rounded-full"
+                  />
+                  <motion.span
+                    animate={{ opacity: [0.3, 1, 0.3] }}
+                    transition={{ duration: 1.4, repeat: Infinity, delay: 0.2 }}
+                    className="w-2 h-2 bg-slate-400 rounded-full"
+                  />
+                  <motion.span
+                    animate={{ opacity: [0.3, 1, 0.3] }}
+                    transition={{ duration: 1.4, repeat: Infinity, delay: 0.4 }}
+                    className="w-2 h-2 bg-slate-400 rounded-full"
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            </motion.div>
+          )}
         </div>
       </div>
 
