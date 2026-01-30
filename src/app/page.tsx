@@ -125,7 +125,21 @@ export default function ChatPage() {
                       <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
                     ) : (
                       <div className="prose prose-sm max-w-none">
-                        <ReactMarkdown>{parseQuickReplies(getMessageText(m)).cleanText}</ReactMarkdown>
+                        <ReactMarkdown
+                          components={{
+                            // TÄMÄ OSA MAHDOLLISTAA KLIKATTAVAT LINKIT UUTEEN VÄLILEHTEEN
+                            a: ({ node, ...props }) => (
+                              <a 
+                                {...props} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-klvl-blue font-bold underline hover:text-blue-800 transition-colors"
+                              />
+                            ),
+                          }}
+                        >
+                          {parseQuickReplies(getMessageText(m)).cleanText}
+                        </ReactMarkdown>
                       </div>
                     )}
                   </div>

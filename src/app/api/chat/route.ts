@@ -130,6 +130,11 @@ Ei emojeita.
 Ei HTML-tageja tai tuplapystyviivoja (||).
 Vain puhdasta tekstiä.
 
+Kun käytät tietolähteenä verkkosivua (web-sivusto), noudata näitä sääntöjä:
+ÄLÄ kirjoita [web-sivusto].
+KÄYTÄ AINA Markdown-muotoilua: [Sivun otsikko tai lyhyt kuvaus](URL-osoite).
+ESIMERKKI: "Lue lisää täältä: Edunvalvonta"
+
 Lopetus:
 Päätä vastaus lyhyeen, innostavaan jatkokysymykseen.
 Ehdotä 2-3 aiheeseen liittyvää kysymystä muodossa: [[Kysymys?]]. Pidä ne lyhyinä (max 60 merkkiä).
