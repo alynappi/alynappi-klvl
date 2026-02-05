@@ -5,26 +5,14 @@ import { NextResponse } from 'next/server'
 export const maxDuration = 30;
 export const runtime = 'nodejs';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
-const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY!
+// Environment variables will be validated in the request handler
 
-// Validate environment variables
-if (!supabaseUrl || !supabaseServiceKey || !MISTRAL_API_KEY) {
-  console.error('Missing environment variables:', {
-    hasSupabaseUrl: !!supabaseUrl,
-    hasSupabaseKey: !!supabaseServiceKey,
-    hasMistralKey: !!MISTRAL_API_KEY
-  })
-}
-
-async function getEmbedding(text: string) {
+async function getEmbedding(text: string, mistralApiKey: string) {
   if (!text) throw new Error('Input missing');
   const response = await fetch('https://api.mistral.ai/v1/embeddings', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${MISTRAL_API_KEY}`,
+      'Authorization': `Bearer ${mistralApiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
@@ -45,6 +33,33 @@ async function getEmbedding(text: string) {
 
 export async function POST(req: Request) {
   try {
+    // Initialize Supabase client with environment variables
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY
+
+    // Validate environment variables
+    if (!supabaseUrl || !supabaseServiceKey || !MISTRAL_API_KEY) {
+      console.error('Missing environment variables:', {
+        hasSupabaseUrl: !!supabaseUrl,
+        hasSupabaseKey: !!supabaseServiceKey,
+        hasMistralKey: !!MISTRAL_API_KEY,
+        supabaseUrlLength: supabaseUrl?.length || 0,
+        supabaseKeyLength: supabaseServiceKey?.length || 0,
+        mistralKeyLength: MISTRAL_API_KEY?.length || 0
+      })
+      throw new Error('Missing required environment variables. Check Vercel settings.')
+    }
+
+    // Log first few characters to verify keys are loaded (without exposing full key)
+    console.log('Environment check:', {
+      supabaseUrl: supabaseUrl.substring(0, 20) + '...',
+      supabaseKeyPrefix: supabaseServiceKey.substring(0, 10) + '...',
+      mistralKeyPrefix: MISTRAL_API_KEY.substring(0, 10) + '...'
+    })
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
     const body = await req.json();
     const { messages: rawMessages } = body;
     
@@ -64,7 +79,7 @@ export async function POST(req: Request) {
       throw new Error('User question is empty');
     }
     
-    const queryEmbedding = await getEmbedding(userQuestion);
+    const queryEmbedding = await getEmbedding(userQuestion, MISTRAL_API_KEY);
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
     console.log('Calling Supabase RPC with embedding length:', queryEmbedding.length);
