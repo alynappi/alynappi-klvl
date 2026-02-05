@@ -51,11 +51,22 @@ export async function POST(req: Request) {
       throw new Error('Missing required environment variables. Check Vercel settings.')
     }
 
+    // Validate Supabase key format (should be JWT, starts with 'eyJ')
+    if (!supabaseServiceKey.startsWith('eyJ')) {
+      console.error('⚠️ Supabase key format error:', {
+        keyPrefix: supabaseServiceKey.substring(0, 20) + '...',
+        keyLength: supabaseServiceKey.length,
+        message: 'Supabase key should be a JWT starting with "eyJ". Legacy keys are disabled.'
+      })
+      throw new Error('Invalid Supabase key format. Please use a JWT-based service_role key (starts with "eyJ"). Legacy keys are disabled in Supabase.')
+    }
+
     // Log first few characters to verify keys are loaded (without exposing full key)
     console.log('Environment check:', {
       supabaseUrl: supabaseUrl.substring(0, 20) + '...',
       supabaseKeyPrefix: supabaseServiceKey.substring(0, 10) + '...',
-      mistralKeyPrefix: MISTRAL_API_KEY.substring(0, 10) + '...'
+      mistralKeyPrefix: MISTRAL_API_KEY.substring(0, 10) + '...',
+      keyFormat: 'JWT ✓'
     })
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
@@ -304,10 +315,19 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
 
   } catch (error: any) {
     console.error('Chat API Error:', error);
+    console.error('Error details:', {
+      message: error?.message,
+      name: error?.name,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint
+    });
     const errorMessage = error?.message || 'Unknown error occurred';
     return NextResponse.json({ 
       error: errorMessage,
-      stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+      details: error?.details || error?.hint || undefined,
+      // Include more details in production for debugging
+      type: error?.name || 'Error'
     }, { status: 500 });
   }
 }
