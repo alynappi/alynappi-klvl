@@ -35,30 +35,22 @@ export async function POST(req: Request) {
   try {
     // Initialize Supabase client with environment variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const supabaseServiceKey = process.env.SUPABASE_SECRET_KEY
     const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY
 
     // Validate environment variables
     if (!supabaseUrl || !supabaseServiceKey || !MISTRAL_API_KEY) {
-      console.error('Missing environment variables:', {
+      const envCheck = {
         hasSupabaseUrl: !!supabaseUrl,
         hasSupabaseKey: !!supabaseServiceKey,
         hasMistralKey: !!MISTRAL_API_KEY,
         supabaseUrlLength: supabaseUrl?.length || 0,
         supabaseKeyLength: supabaseServiceKey?.length || 0,
-        mistralKeyLength: MISTRAL_API_KEY?.length || 0
-      })
-      throw new Error('Missing required environment variables. Check Vercel settings.')
-    }
-
-    // Validate Supabase key format (should be JWT, starts with 'eyJ')
-    if (!supabaseServiceKey.startsWith('eyJ')) {
-      console.error('⚠️ Supabase key format error:', {
-        keyPrefix: supabaseServiceKey.substring(0, 20) + '...',
-        keyLength: supabaseServiceKey.length,
-        message: 'Supabase key should be a JWT starting with "eyJ". Legacy keys are disabled.'
-      })
-      throw new Error('Invalid Supabase key format. Please use a JWT-based service_role key (starts with "eyJ"). Legacy keys are disabled in Supabase.')
+        mistralKeyLength: MISTRAL_API_KEY?.length || 0,
+        allEnvKeys: Object.keys(process.env).filter(k => k.includes('SUPABASE') || k.includes('MISTRAL'))
+      }
+      console.error('❌ Missing environment variables:', envCheck)
+      throw new Error(`Missing required environment variables. Check Vercel settings. Required: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, MISTRAL_API_KEY. Found keys: ${envCheck.allEnvKeys.join(', ')}`)
     }
 
     // Log first few characters to verify keys are loaded (without exposing full key)
@@ -66,7 +58,7 @@ export async function POST(req: Request) {
       supabaseUrl: supabaseUrl.substring(0, 20) + '...',
       supabaseKeyPrefix: supabaseServiceKey.substring(0, 10) + '...',
       mistralKeyPrefix: MISTRAL_API_KEY.substring(0, 10) + '...',
-      keyFormat: 'JWT ✓'
+      keyLength: supabaseServiceKey.length
     })
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
