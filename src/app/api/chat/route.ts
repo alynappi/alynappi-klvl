@@ -10,6 +10,15 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY!
 
+// Validate environment variables
+if (!supabaseUrl || !supabaseServiceKey || !MISTRAL_API_KEY) {
+  console.error('Missing environment variables:', {
+    hasSupabaseUrl: !!supabaseUrl,
+    hasSupabaseKey: !!supabaseServiceKey,
+    hasMistralKey: !!MISTRAL_API_KEY
+  })
+}
+
 async function getEmbedding(text: string) {
   if (!text) throw new Error('Input missing');
   const response = await fetch('https://api.mistral.ai/v1/embeddings', {
@@ -58,6 +67,7 @@ export async function POST(req: Request) {
     const queryEmbedding = await getEmbedding(userQuestion);
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
+    console.log('Calling Supabase RPC with embedding length:', queryEmbedding.length);
     const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_threshold: 0.15,
@@ -65,7 +75,14 @@ export async function POST(req: Request) {
     });
     
     if (matchError) {
-      console.error('Supabase RPC error:', matchError);
+      console.error('Supabase RPC error details:', {
+        message: matchError.message,
+        details: matchError.details,
+        hint: matchError.hint,
+        code: matchError.code,
+        hasSupabaseUrl: !!supabaseUrl,
+        hasSupabaseKey: !!supabaseServiceKey && supabaseServiceKey.length > 0
+      });
       throw new Error(`Database search failed: ${matchError.message}`);
     }
 
