@@ -89,7 +89,7 @@ export default function ChatPage() {
             Ä
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">Äly-Nappi Arkisto</h1>
+            <h1 className="text-xl font-bold tracking-tight">Äly-Nappi Arkisto - DEMOVERSIO</h1>
             <p className="text-[10px] uppercase tracking-widest opacity-80">KLVL ry:n tekoälyavustaja</p>
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function ChatPage() {
         {messages.length === 0 && (
   <div className="text-center py-16 px-6 bg-white rounded-3xl shadow-sm border border-slate-100 mt-10">
     <h2 className="text-klvl-blue text-2xl font-bold mb-4">
-    Hei, olen ÄlyNappi, KLVL:n tekoälyavustaja
+    Hei, olen ÄlyNappi, KLVL:n tekoälyavustaja. Olen vasta demoversio, mutta osaan jo vastata aika moneen kysymykseen.
     </h2>
     <p className="text-slate-600 mb-6 max-w-md mx-auto">
       Kysy vapaasti kuulovammaan, edunvalvontaan tai perheiden tukeen liittyvistä aiheista. 
