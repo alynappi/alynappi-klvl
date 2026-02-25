@@ -61,12 +61,56 @@ export async function POST(req: Request) {
       keyLength: supabaseServiceKey.length
     })
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      db: {
+        schema: 'public',
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    })
+
+    // Test connection first to catch paused projects early
+    console.log('🔌 Testing Supabase connection...');
+    const { data: healthCheck, error: healthError } = await supabase
+      .from('documents')
+      .select('id')
+      .limit(1);
+    
+    if (healthError) {
+      console.error('❌ Supabase connection failed:', {
+        message: healthError.message,
+        code: healthError.code,
+        details: healthError.details,
+        hint: healthError.hint
+      });
+      
+      // Check for common pause/unpause errors
+      if (healthError.message?.includes('paused') || 
+          healthError.message?.includes('inactive') ||
+          healthError.code === 'PGRST301' ||
+          healthError.code === '57014') {
+        throw new Error('Supabase project appears to be paused or reactivating. Please check your Supabase dashboard and wait a few moments for the project to fully activate.');
+      }
+      
+      if (healthError.message?.includes('timeout') || healthError.message?.includes('connection')) {
+        throw new Error('Database connection timeout. The project might be reactivating. Please try again in a moment.');
+      }
+      
+      throw new Error(`Database connection failed: ${healthError.message}`);
+    }
+    
+    console.log('✅ Supabase connection successful');
 
     const body = await req.json();
-    const { messages: rawMessages } = body;
+    console.log('📥 Received request body:', JSON.stringify(body, null, 2));
+    
+    // Handle different request formats from TextStreamChatTransport
+    const rawMessages = body.messages || body;
     
     if (!rawMessages || !Array.isArray(rawMessages)) {
+      console.error('❌ Invalid request format:', { body, rawMessages });
       throw new Error('Invalid request: messages array is required');
     }
 
@@ -86,11 +130,40 @@ export async function POST(req: Request) {
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
     console.log('Calling Supabase RPC with embedding length:', queryEmbedding.length);
-    const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
-      query_embedding: queryEmbedding,
-      match_threshold: 0.15,
-      match_count: 8
-    });
+    
+    // Add retry logic for RPC calls in case of temporary connection issues
+    let matchedSections = null;
+    let matchError = null;
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const { data, error } = await supabase.rpc('match_documents', {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.15,
+        match_count: 8
+      });
+      
+      if (!error) {
+        matchedSections = data;
+        break;
+      }
+      
+      matchError = error;
+      console.warn(`⚠️  RPC attempt ${attempt}/${maxRetries} failed:`, matchError.message);
+      
+      // If it's a connection/pause error, don't retry
+      if (matchError.message?.includes('paused') || 
+          matchError.message?.includes('inactive') ||
+          matchError.code === 'PGRST301' ||
+          matchError.code === '57014') {
+        break;
+      }
+      
+      // Wait before retry (exponential backoff)
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
     
     if (matchError) {
       console.error('Supabase RPC error details:', {
@@ -101,6 +174,16 @@ export async function POST(req: Request) {
         hasSupabaseUrl: !!supabaseUrl,
         hasSupabaseKey: !!supabaseServiceKey && supabaseServiceKey.length > 0
       });
+      
+      // Provide helpful error messages for common issues
+      if (matchError.message?.includes('paused') || matchError.message?.includes('inactive')) {
+        throw new Error('Supabase project is paused. Please activate it in your Supabase dashboard.');
+      }
+      
+      if (matchError.message?.includes('timeout')) {
+        throw new Error('Database query timed out. The project might still be reactivating. Please try again in a moment.');
+      }
+      
       throw new Error(`Database search failed: ${matchError.message}`);
     }
 
@@ -312,14 +395,29 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
       name: error?.name,
       code: error?.code,
       details: error?.details,
-      hint: error?.hint
+      hint: error?.hint,
+      stack: error?.stack
     });
+    
+    // Return error as a stream-compatible response so frontend can handle it
     const errorMessage = error?.message || 'Unknown error occurred';
-    return NextResponse.json({ 
-      error: errorMessage,
-      details: error?.details || error?.hint || undefined,
-      // Include more details in production for debugging
-      type: error?.name || 'Error'
-    }, { status: 500 });
+    const encoder = new TextEncoder();
+    const errorStream = new ReadableStream({
+      start(controller) {
+        // Send error as text that can be displayed to user
+        const errorText = `\n\n❌ Virhe: ${errorMessage}\n\nJos ongelma jatkuu, tarkista Vercel-ympäristömuuttujat.`;
+        controller.enqueue(encoder.encode(errorText));
+        controller.close();
+      }
+    });
+    
+    return new Response(errorStream, {
+      status: 500,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
   }
 }
