@@ -53,26 +53,9 @@ export async function POST(req: Request) {
       throw new Error(`Missing required environment variables. Check Vercel settings. Required: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY, MISTRAL_API_KEY. Found keys: ${envCheck.allEnvKeys.join(', ')}`)
     }
 
-    // Log first few characters to verify keys are loaded (without exposing full key)
-    console.log('Environment check:', {
-      supabaseUrl: supabaseUrl.substring(0, 20) + '...',
-      supabaseKeyPrefix: supabaseServiceKey.substring(0, 10) + '...',
-      mistralKeyPrefix: MISTRAL_API_KEY.substring(0, 10) + '...',
-      keyLength: supabaseServiceKey.length
-    })
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      db: {
-        schema: 'public',
-      },
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    })
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     const body = await req.json();
-    console.log('📥 Received request body:', JSON.stringify(body, null, 2));
     
     // Handle different request formats from TextStreamChatTransport
     const rawMessages = body.messages || body;
@@ -97,9 +80,6 @@ export async function POST(req: Request) {
     const queryEmbedding = await getEmbedding(userQuestion, MISTRAL_API_KEY);
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
-    console.log('Calling Supabase RPC with embedding length:', queryEmbedding.length);
-    
-    // Call RPC with timeout protection (retry only on specific errors)
     const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_threshold: 0.15,
@@ -107,37 +87,8 @@ export async function POST(req: Request) {
     });
     
     if (matchError) {
-      console.error('Supabase RPC error details:', {
-        message: matchError.message,
-        details: matchError.details,
-        hint: matchError.hint,
-        code: matchError.code,
-      });
-      
-      // Provide helpful error messages for common issues
-      if (matchError.message?.includes('paused') || matchError.message?.includes('inactive')) {
-        throw new Error('Supabase project is paused. Please activate it in your Supabase dashboard.');
-      }
-      
-      if (matchError.message?.includes('timeout') || matchError.code === 'PGRST301') {
-        throw new Error('Database query timed out. The project might still be reactivating. Please try again in a moment.');
-      }
-      
+      console.error('Supabase RPC error:', matchError.message);
       throw new Error(`Database search failed: ${matchError.message}`);
-    }
-
-    // Log first section to verify category is being returned
-    if (matchedSections && matchedSections.length > 0) {
-      const firstSection = matchedSections[0];
-      console.log('📋 First matched section sample:', {
-        id: firstSection.id,
-        title: firstSection.metadata?.title || firstSection.title,
-        category: firstSection.category,
-        page_number: firstSection.page_number,
-        similarity: firstSection.similarity,
-        hasContent: !!firstSection.content,
-        metadata: firstSection.metadata
-      });
     }
 
     // Format context with category and page number metadata
@@ -146,11 +97,6 @@ export async function POST(req: Request) {
       const pageNumber = s.page_number || null;
       // Extract title from metadata object (new RPC structure) or fallback to direct title field
       const title = s.metadata?.title || s.title || '';
-      
-      // Log for debugging
-      if (!category) {
-        console.warn(`⚠️  Missing category for section: ${title} (section ID: ${s.id || 'unknown'})`);
-      }
       
       // Format: [Category] Title, s. X - Category is REQUIRED
       // If category is missing, use a fallback but log it
@@ -328,15 +274,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     });
 
   } catch (error: any) {
-    console.error('Chat API Error:', error);
-    console.error('Error details:', {
-      message: error?.message,
-      name: error?.name,
-      code: error?.code,
-      details: error?.details,
-      hint: error?.hint,
-      stack: error?.stack
-    });
+    console.error('Chat API Error:', error?.message || error);
     
     // Return error as a stream-compatible response so frontend can handle it
     const errorMessage = error?.message || 'Unknown error occurred';
