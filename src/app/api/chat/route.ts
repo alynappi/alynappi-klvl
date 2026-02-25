@@ -32,6 +32,7 @@ async function getEmbedding(text: string, mistralApiKey: string) {
 }
 
 export async function POST(req: Request) {
+  const startTime = Date.now();
   try {
     // Initialize Supabase client with environment variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -77,14 +78,18 @@ export async function POST(req: Request) {
       throw new Error('User question is empty');
     }
     
+    const embeddingStart = Date.now();
     const queryEmbedding = await getEmbedding(userQuestion, MISTRAL_API_KEY);
+    console.log(`⏱️  Embedding took: ${Date.now() - embeddingStart}ms`);
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
+    const rpcStart = Date.now();
     const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_threshold: 0.15,
       match_count: 8
     });
+    console.log(`⏱️  Supabase RPC took: ${Date.now() - rpcStart}ms`);
     
     if (matchError) {
       console.error('Supabase RPC error:', matchError.message);
@@ -163,6 +168,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
 
     // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
+    const mistralStart = Date.now();
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -180,13 +186,20 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         stream: true,
       })
     });
+    console.log(`⏱️  Mistral API connection took: ${Date.now() - mistralStart}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Mistral API error: ${response.status} - ${errorText}`);
     }
+    
+    console.log(`⏱️  Total time before streaming: ${Date.now() - startTime}ms`);
 
     const encoder = new TextEncoder();
+    let streamStartTime = Date.now();
+    let chunkCount = 0;
+    let totalBytes = 0;
+    
     const stream = new ReadableStream({
       async start(controller) {
         const reader = response.body?.getReader();
@@ -205,6 +218,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
             done = result.done;
             
             if (result.value) {
+              totalBytes += result.value.length;
               // Decode with stream:true to handle partial UTF-8 sequences
               buffer += decoder.decode(result.value, { stream: !done });
             }
@@ -219,6 +233,8 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
                 const data = line.slice(6).trim();
                 if (data === '[DONE]') {
                   done = true;
+                  const streamDuration = Date.now() - streamStartTime;
+                  console.log(`✅ Stream complete: ${chunkCount} chunks, ${totalBytes} bytes, ${streamDuration}ms`);
                   break;
                 }
                 if (data) {
@@ -226,6 +242,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
                     const json = JSON.parse(data);
                     const text = json.choices?.[0]?.delta?.content;
                     if (text) {
+                      chunkCount++;
                       controller.enqueue(encoder.encode(text));
                     }
                   } catch (e) {
@@ -246,6 +263,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
                   const json = JSON.parse(data);
                   const text = json.choices?.[0]?.delta?.content;
                   if (text) {
+                    chunkCount++;
                     controller.enqueue(encoder.encode(text));
                   }
                 } catch (e) {
@@ -256,8 +274,12 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
           }
           
           // Stream complete
+          const totalTime = Date.now() - startTime;
+          console.log(`⏱️  Total request time: ${totalTime}ms`);
         } catch (e) {
           console.error('Stream error:', e);
+          const errorTime = Date.now() - startTime;
+          console.error(`❌ Stream failed after ${errorTime}ms, ${chunkCount} chunks sent`);
           controller.error(e);
         } finally {
           controller.close();
