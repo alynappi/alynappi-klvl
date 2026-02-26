@@ -196,23 +196,41 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
 
     // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
-    const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${MISTRAL_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'mistral-large-latest', // vaihda malli mistral-large-latest
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
-        max_tokens: 2000,    //nosta tätä tuotannossa 1000
-        temperature: 0.7,
-        frequency_penalty: 0.2,
-        presence_penalty: 0.1,
-        top_p: 1,
-        stream: true,
-      })
-    });
+    // Add timeout to handle slow connections (25 seconds - gives buffer before 60s limit)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 25000); // 25 second timeout for connection establishment
+    
+    let response;
+    try {
+      response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${MISTRAL_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'mistral-large-latest', // vaihda malli mistral-large-latest
+          messages: [{ role: 'system', content: systemPrompt }, ...messages],
+          max_tokens: 2000,    //nosta tätä tuotannossa 1000
+          temperature: 0.7,
+          frequency_penalty: 0.2,
+          presence_penalty: 0.1,
+          top_p: 1,
+          stream: true,
+        })
+      });
+      clearTimeout(timeoutId);
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        const elapsed = Date.now() - startTime;
+        throw new Error(`Mistral API connection timeout after ${elapsed}ms - connection is taking too long. This may be a network issue or Mistral API problem.`);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
