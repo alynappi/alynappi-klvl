@@ -195,15 +195,30 @@ LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
 
-    // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
-    // Add timeout to handle slow connections (25 seconds - gives buffer before 60s limit)
+    // 4. MISTRAL KUTSU - Diagnostic version to find root cause of latency
+    const mistralStart = Date.now();
+    
+    // Measure DNS resolution time (if possible)
+    const dnsStart = Date.now();
+    try {
+      // Force DNS lookup by resolving the hostname
+      const dns = await import('dns/promises');
+      await dns.lookup('api.mistral.ai').catch(() => {});
+    } catch (e) {
+      // DNS module might not be available, that's okay
+    }
+    const dnsTime = Date.now() - dnsStart;
+    
+    // Measure connection establishment time
+    const connectionStart = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, 25000); // 25 second timeout for connection establishment
+    }, 30000); // 30 second timeout - enough to see where it's slow
     
     let response;
     try {
+      const fetchStart = Date.now();
       response = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -212,9 +227,9 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         },
         signal: controller.signal,
         body: JSON.stringify({
-          model: 'mistral-large-latest', // vaihda malli mistral-large-latest
+          model: 'mistral-large-latest',
           messages: [{ role: 'system', content: systemPrompt }, ...messages],
-          max_tokens: 2000,    //nosta tätä tuotannossa 1000
+          max_tokens: 2000,
           temperature: 0.7,
           frequency_penalty: 0.2,
           presence_penalty: 0.1,
@@ -223,11 +238,44 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         })
       });
       clearTimeout(timeoutId);
+      
+      const fetchTime = Date.now() - fetchStart;
+      const connectionTime = Date.now() - connectionStart;
+      const totalTime = Date.now() - mistralStart;
+      
+      // Detailed diagnostics
+      console.log('🔍 Mistral API Connection Diagnostics:', {
+        dnsResolution: `${dnsTime}ms`,
+        connectionEstablishment: `${connectionTime}ms`,
+        fetchTotal: `${fetchTime}ms`,
+        totalTime: `${totalTime}ms`,
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        vercelRegion: process.env.VERCEL_REGION || 'unknown',
+        nodeVersion: process.version
+      });
+      
+      if (totalTime > 2000) {
+        console.warn(`⚠️  SLOW CONNECTION DETECTED: ${totalTime}ms (should be <2000ms)`);
+        console.warn(`   Breakdown: DNS=${dnsTime}ms, Connection=${connectionTime}ms, Fetch=${fetchTime}ms`);
+        console.warn(`   Possible causes:`);
+        console.warn(`   - DNS resolution slow: ${dnsTime > 100 ? 'YES' : 'NO'}`);
+        console.warn(`   - Connection establishment slow: ${connectionTime > 2000 ? 'YES' : 'NO'}`);
+        console.warn(`   - Vercel region: ${process.env.VERCEL_REGION || 'unknown'}`);
+      }
     } catch (error: any) {
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - mistralStart;
+      console.error('❌ Mistral API connection failed:', {
+        error: error.message,
+        elapsed: `${elapsed}ms`,
+        dnsTime: `${dnsTime}ms`,
+        connectionTime: `${Date.now() - connectionStart}ms`,
+        name: error.name,
+        code: error.code
+      });
       if (error.name === 'AbortError') {
-        const elapsed = Date.now() - startTime;
-        throw new Error(`Mistral API connection timeout after ${elapsed}ms - connection is taking too long. This may be a network issue or Mistral API problem.`);
+        throw new Error(`Mistral API connection timeout after ${elapsed}ms - DNS: ${dnsTime}ms, Connection: ${Date.now() - connectionStart}ms. This indicates a network/infrastructure issue.`);
       }
       throw error;
     }
