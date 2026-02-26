@@ -9,14 +9,25 @@ export const runtime = 'nodejs';
 
 async function getEmbedding(text: string, mistralApiKey: string) {
   if (!text) throw new Error('Input missing');
+  
+  const startTime = Date.now();
   const response = await fetch('https://api.mistral.ai/v1/embeddings', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${mistralApiKey}`,
       'Content-Type': 'application/json',
+      'Connection': 'keep-alive',
+      'Keep-Alive': 'timeout=5, max=1000',
     },
+    // @ts-ignore - Next.js fetch supports keepalive
+    keepalive: true,
     body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
   })
+  
+  const fetchTime = Date.now() - startTime;
+  if (fetchTime > 2000) {
+    console.warn(`⚠️  Slow embedding fetch: ${fetchTime}ms`);
+  }
   
   if (!response.ok) {
     const errorText = await response.text();
@@ -167,28 +178,34 @@ LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
 
-    // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
+    // 4. MISTRAL KUTSU - Optimized for fast connections
     const mistralStart = Date.now();
     
-    // Add timeout to fail fast if Mistral is slow (25 seconds max - gives buffer for streaming before 60s Vercel limit)
+    // Optimize fetch with connection keep-alive and proper headers
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, 25000); // 25 second timeout - fails fast to allow time for streaming before 60s Vercel limit
+    }, 10000); // 10 second timeout - should be plenty for a normal connection
     
     let response;
     try {
+      // Use optimized fetch with keep-alive headers for connection reuse
+      // This helps with cold starts and reduces connection establishment time
       response = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${MISTRAL_API_KEY}`,
           'Content-Type': 'application/json',
+          'Connection': 'keep-alive', // Reuse connections to avoid TCP handshake delays
+          'Keep-Alive': 'timeout=5, max=1000',
         },
         signal: controller.signal,
+        // @ts-ignore - Next.js fetch supports keepalive option
+        keepalive: true, // Keep connection alive for reuse (reduces cold start latency)
         body: JSON.stringify({
           model: 'mistral-large-latest',
           messages: [{ role: 'system', content: systemPrompt }, ...messages],
-          max_tokens: 1000,    // Restored to 1000 - now that we have 60s timeout
+          max_tokens: 1000,
           temperature: 0.7,
           frequency_penalty: 0.2,
           presence_penalty: 0.1,
@@ -197,15 +214,23 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         })
       });
       clearTimeout(timeoutId);
+      
+      const connectionTime = Date.now() - mistralStart;
+      console.log(`⏱️  Mistral API connection took: ${connectionTime}ms`);
+      
+      if (connectionTime > 2000) {
+        console.warn(`⚠️  SLOW CONNECTION DETECTED: ${connectionTime}ms (should be <2000ms)`);
+        console.warn(`   Possible causes: Vercel cold start, network latency, Mistral API region mismatch`);
+        console.warn(`   Check Vercel function logs for cold start indicators`);
+      }
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('Mistral API connection timeout - request took longer than 25 seconds. Please try again.');
+        const elapsed = Date.now() - mistralStart;
+        throw new Error(`Mistral API connection timeout after ${elapsed}ms - network issue detected. Check Vercel region and Mistral API status.`);
       }
       throw error;
     }
-    
-    console.log(`⏱️  Mistral API connection took: ${Date.now() - mistralStart}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
