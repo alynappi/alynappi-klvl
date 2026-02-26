@@ -9,26 +9,41 @@ export const runtime = 'nodejs';
 
 async function getEmbedding(text: string, mistralApiKey: string) {
   if (!text) throw new Error('Input missing');
-  const response = await fetch('https://api.mistral.ai/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${mistralApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
-  })
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Embedding API error: ${response.status} - ${errorText}`);
+  // Add timeout to prevent hanging on slow connections
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+  
+  try {
+    const response = await fetch('https://api.mistral.ai/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${mistralApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
+    });
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Embedding API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.data || !data.data[0] || !data.data[0].embedding) {
+      throw new Error('Invalid embedding response format');
+    }
+    
+    return data.data[0].embedding;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Embedding API connection timeout after 10 seconds');
+    }
+    throw error;
   }
-  
-  const data = await response.json();
-  if (!data.data || !data.data[0] || !data.data[0].embedding) {
-    throw new Error('Invalid embedding response format');
-  }
-  
-  return data.data[0].embedding;
 }
 
 export async function POST(req: Request) {
@@ -215,7 +230,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, 30000); // 30 second timeout - enough to see where it's slow
+    }, 25000); // 25 second timeout - allows for slow connections but fails fast
     
     let response;
     try {
@@ -230,11 +245,8 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         body: JSON.stringify({
           model: 'mistral-large-latest',
           messages: [{ role: 'system', content: systemPrompt }, ...messages],
-          max_tokens: 2000,
+          max_tokens: 1500, // Reduced from 2000 for faster generation
           temperature: 0.7,
-          frequency_penalty: 0.2,
-          presence_penalty: 0.1,
-          top_p: 1,
           stream: true,
         })
       });
