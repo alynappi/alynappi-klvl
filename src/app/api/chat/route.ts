@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-// PAKOTETAAN EDGE RUNTIME: Tämä on elinehto Vercelin ilmaisversiossa.
+// PAKOTETAAN EDGE RUNTIME: Tämä on elinehto Vercelin ilmaisversiossa, jotta vältytään Node.js hitaudelta.
 export const runtime = 'edge';
 
 async function getEmbedding(text: string, mistralApiKey: string) {
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_threshold: 0.15,
-      match_count: 6 // Sopiva määrä kontekstia
+      match_count: 4 // Pienennetty määrä nopeuttamaan vastausta
     });
     
     if (matchError) throw new Error(`Tietokantahaku epäonnistui: ${matchError.message}`);
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       return `[Lähde: ${category} ${title}${pageNumber}]\n${s.content}`;
     }).join('\n\n---\n\n');
 
-    // 3. TÄYSI ROOLIKUVAUS (System Prompt palautettu ennalleen)
+    // 3. TÄYSI ROOLIKUVAUS
     const systemPrompt = `
 Rooli: Olet Äly-Nappi, avulias ja empaattinen arkistoavustaja. Vastauksesi perustuvat annettuihin Nappi-lehden tekstiotteisiin.
 
@@ -87,7 +87,7 @@ LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
 
-    // 4. Kutsu Mistraliin - Suora striimaus ilman välikäsiä
+    // 4. Kutsu Mistraliin - Käytetään nopeampaa mistral-small-latest mallia
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -95,9 +95,9 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'mistral-large-latest',
+        model: 'mistral-small-latest', 
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
-        max_tokens: 1500,
+        max_tokens: 1000,
         temperature: 0.7,
         stream: true, 
       })
@@ -108,8 +108,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
       throw new Error(`Mistral API Error: ${err}`);
     }
 
-    // TÄMÄ ON SE TÄRKEIN KOHTA: Palautetaan Mistralin oma striimi suoraan Response-oliona.
-    // Tämä kertoo Vercelille, että vastaus on jo alkanut, jolloin 10s aikaraja ei katkaise prosessia.
+    // Palautetaan striimi suoraan. Tämä estää Verceliä katkaisemasta yhteyttä.
     return new Response(response.body, {
       headers: {
         'Content-Type': 'text/event-stream',
