@@ -254,7 +254,6 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     } catch (error: any) {
       clearTimeout(timeoutId);
       const elapsed = Date.now() - mistralStart;
-      const elapsed = Date.now() - mistralStart;
       console.error('❌ Mistral API connection failed:', {
         error: error.message,
         elapsed: `${elapsed}ms`,
