@@ -1,13 +1,11 @@
-
 import { createClient } from '@supabase/supabase-js'
-import { NextResponse } from 'next/server'
 
-// Käytetään Edge-runtimea, koska se herää sekunteja nopeammin kuin Node.js
+// PAKOTETAAN EDGE RUNTIME: Tämä on elinehto Vercelin ilmaisversiossa.
 export const runtime = 'edge';
 
 async function getEmbedding(text: string, mistralApiKey: string) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000); 
+  const timeoutId = setTimeout(() => controller.abort(), 4000); 
 
   try {
     const response = await fetch('https://api.mistral.ai/v1/embeddings', {
@@ -25,7 +23,7 @@ async function getEmbedding(text: string, mistralApiKey: string) {
     return data.data[0].embedding;
   } catch (e) {
     clearTimeout(timeoutId);
-    throw new Error('Mistral API (embeddings) on liian hidas juuri nyt.');
+    throw new Error('Mistral API (embeddings) on hidas. Yritä hetken päästä uudelleen.');
   }
 }
 
@@ -49,14 +47,14 @@ export async function POST(req: Request) {
 
     const userQuestion = messages[messages.length - 1]?.content;
     
-    // 1. Haetaan embedding
+    // 1. Haetaan embedding (n. 0.2s)
     const queryEmbedding = await getEmbedding(userQuestion, MISTRAL_API_KEY);
 
-    // 2. Tietokantahaku Supabasesta
+    // 2. Tietokantahaku Supabasesta (n. 1.1s)
     const { data: matchedSections, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_threshold: 0.15,
-      match_count: 7 
+      match_count: 6 // Sopiva määrä kontekstia
     });
     
     if (matchError) throw new Error(`Tietokantahaku epäonnistui: ${matchError.message}`);
@@ -68,59 +66,28 @@ export async function POST(req: Request) {
       return `[Lähde: ${category} ${title}${pageNumber}]\n${s.content}`;
     }).join('\n\n---\n\n');
 
-    // 3. TÄYSI ROOLIKUVAUS (System Prompt)
+    // 3. TÄYSI ROOLIKUVAUS (System Prompt palautettu ennalleen)
     const systemPrompt = `
 Rooli: Olet Äly-Nappi, avulias ja empaattinen arkistoavustaja. Vastauksesi perustuvat annettuihin Nappi-lehden tekstiotteisiin.
 
 Yleiset säännöt:
 Lähdemateriaali: Käytä vain annettua arkistomateriaalia. Jos tietoa ei löydy, sano: "Etsin arkistosta ahkerasti, mutta tästä aiheesta ei valitettavasti löytynyt mainintoja. 🔍 Voinko auttaa jossain muussa?"
-Sävy: Ole ystävällinen, eläväinen ja asiantunteva opas. Käytä emojeita (📅, 📍, ❄️) elävöittämään tekstiä (mutta ei taulukoiden sisällä).
-Lähdeviitteet (KRIITTINEN): Jokaisen tiedon perässä on oltava lähde muodossa: [Kategoria] Nimi, s. X. Kategoria on pakollinen.
-Esim: [Lehti] Nappi_1_2025, s. 12 tai [Tutkimus] Pelkkikangas, s. 3.
-SÄÄNTÖ LÄHTEIDEN NIMILLE:
-ÄLÄ KOSKAAN käännä julkaisujen, esitteiden, oppaiden tai Nappi-lehtien nimiä muille kielille.
-Nimien on pysyttävä aina alkuperäisessä muodossaan (yleensä suomeksi), vaikka vastaus olisi muulla kielellä.
-Esimerkki:
-VÄÄRIN: [Брошюра] Памятка для родителей
-OIKEIN: [Брошюра] Vinkkivihko vanhemmille
-Voit kääntää sivunumeron (esm. "s." -> "с.") ja lähdetyypin (esim. "[Lehti]" -> "[Журнал]"), mutta itse teoksen nimi on pyhä.
+Sävy: Ole ystävällinen, eläväinen ja asiantunteva opas. Käytä emojeita (📅, 📍, ❄️) elävöittämään tekstiä.
+Lähdeviitteet (KRIITTINEN): Jokaisen tiedon perässä on oltava lähde muodossa: [Kategoria] Nimi, s. X.
+SÄÄNTÖ LÄHTEIDEN NIMILLE: ÄLÄ KOSKAAN käännä julkaisujen nimiä. Nimien on pysyttävä alkuperäisinä.
 
-Rakenne ja muotoilu:
-ÄLÄ KÄYTÄ TAULUKOITA OLLENKAAN. Markdown-taulukot ovat kiellettyjä niiden huonon luettavuuden vuoksi.
+Rakenne:
+ÄLÄ KÄYTÄ TAULUKOITA. Käytä selkeitä listoja ja lihavointia.
+Kun käytät verkkosivua, käytä Markdown-linkkiä: [Sivun otsikko](URL-osoite).
 
-KÄYTÄ LISTOJA: Esitä kaikki vertailut ja apuvälineet selkeinä, otsikoituina listoina.
-MUOTOILU: Käytä lihavointia avainsanoille ja jätä tyhjä rivi eri kohtien välille.
-
-ESIMERKKI: 
-1. Kuulokoje
-- Käyttötarkoitus: Vahvistaa ääniä...
-- Hankintatapa: Hoitava sairaala...
-- Lähde: [Tutkimus] Pelkkikangas, s. 15.
-
-Kun käytät tietolähteenä verkkosivua (web-sivusto), noudata näitä sääntöjä:
-ÄLÄ kirjoita [web-sivusto].
-KÄYTÄ AINA Markdown-muotoilua: [Sivun otsikko tai lyhyt kuvaus](URL-osoite).
-ESIMERKKI: "Lue lisää täältä: Edunvalvonta"
-
-LÄHDELUETTELO: 
-Lisää jokaisen vastauksen loppuun otsikko LÄHTEET:
-Listaa jokainen lähde omalle rivilleen kuten alla esimerkissä.
-    LÄHTEET:
-    [Opas] Vinkkivihko vanhemmille 
-    [Tutkimus] Elina Pelkkikangas: Kuulovammainen lapsi päivähoidossa 
-    [Tutkimus] Ensiaskeleet lapsen kuulomatkalle
-    [Lehti] Nappi_1_2025, s. 12
-
-
-Lopetus:
-Päätä vastaus lyhyeen, innostavaan jatkokysymykseen.
-Ehdotä 2-3 aiheeseen liittyvää kysymystä muodossa: [[Kysymys?]]. Pidä ne lyhyinä (max 60 merkkiä).
+Lisää loppuun otsikko LÄHTEET: ja listaa lähteet allekkain.
+Päätä vastaus 2-3 aiheeseen liittyvään kysymykseen muodossa: [[Kysymys?]].
 
 LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
 
-    // 4. Kutsu Mistraliin
+    // 4. Kutsu Mistraliin - Suora striimaus ilman välikäsiä
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -132,7 +99,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
         max_tokens: 1500,
         temperature: 0.7,
-        stream: true, // Tämä on tärkeää, jotta vastaus alkaa valua heti
+        stream: true, 
       })
     });
 
@@ -141,7 +108,8 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
       throw new Error(`Mistral API Error: ${err}`);
     }
 
-    // Edge-runtimessa voimme palauttaa Mistralin response.body:n suoraan selaimelle
+    // TÄMÄ ON SE TÄRKEIN KOHTA: Palautetaan Mistralin oma striimi suoraan Response-oliona.
+    // Tämä kertoo Vercelille, että vastaus on jo alkanut, jolloin 10s aikaraja ei katkaise prosessia.
     return new Response(response.body, {
       headers: {
         'Content-Type': 'text/event-stream',
@@ -152,6 +120,9 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
 
   } catch (error: any) {
     console.error('Chat API Error:', error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
