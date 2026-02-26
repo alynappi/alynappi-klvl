@@ -64,8 +64,14 @@ export async function POST(req: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    const body = await req.json();
-    console.log('📥 Request body parsed, messages count:', body.messages?.length || body.length || 0);
+    let body;
+    try {
+      body = await req.json();
+      console.log('📥 Request body parsed, messages count:', body.messages?.length || body.length || 0);
+    } catch (parseError: any) {
+      console.error('❌ Failed to parse request body:', parseError?.message);
+      throw new Error(`Invalid JSON in request body: ${parseError?.message}`);
+    }
     
     // Handle different request formats from TextStreamChatTransport
     const rawMessages = body.messages || body;
@@ -362,7 +368,16 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     });
 
   } catch (error: any) {
-    console.error('Chat API Error:', error?.message || error);
+    // Enhanced error logging
+    const errorDetails = {
+      message: error?.message || 'Unknown error',
+      stack: error?.stack,
+      name: error?.name,
+      cause: error?.cause,
+      timestamp: new Date().toISOString(),
+    };
+    console.error('❌ Chat API Error:', JSON.stringify(errorDetails, null, 2));
+    console.error('❌ Error stack:', error?.stack);
     
     // Return error as a stream-compatible response so frontend can handle it
     const errorMessage = error?.message || 'Unknown error occurred';
@@ -370,7 +385,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     const errorStream = new ReadableStream({
       start(controller) {
         // Send error as text that can be displayed to user
-        const errorText = `\n\n❌ Virhe: ${errorMessage}\n\nJos ongelma jatkuu, tarkista Vercel-ympäristömuuttujat.`;
+        const errorText = `\n\n❌ Virhe: ${errorMessage}\n\nJos ongelma jatkuu, tarkista Vercel-ympäristömuuttujat ja tarkista Vercel-lokit.`;
         controller.enqueue(encoder.encode(errorText));
         controller.close();
       }
