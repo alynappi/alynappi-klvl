@@ -12,7 +12,7 @@ async function getEmbedding(text: string, mistralApiKey: string) {
   
   // Add timeout to prevent hanging on slow connections
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout - embeddings are usually fast but allow buffer
   
   try {
     const response = await fetch('https://api.mistral.ai/v1/embeddings', {
@@ -40,8 +40,10 @@ async function getEmbedding(text: string, mistralApiKey: string) {
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      throw new Error('Embedding API connection timeout after 10 seconds');
+      console.error('❌ Embedding API timeout after 15 seconds');
+      throw new Error('Embedding API connection timeout after 15 seconds');
     }
+    console.error('❌ Embedding API error:', error.message);
     throw error;
   }
 }
