@@ -115,8 +115,81 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
       throw new Error(`Mistral API Error: ${err}`);
     }
 
-    // 5. Palautetaan striimi suoraan
-    return new Response(response.body, {
+    // 5. Prosessoidaan striimi ja poimitaan vain tekstisisältö
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        if (!reader) {
+          controller.close();
+          return;
+        }
+
+        try {
+          let buffer = '';
+          let done = false;
+
+          while (!done) {
+            const result = await reader.read();
+            done = result.done;
+
+            if (result.value) {
+              buffer += decoder.decode(result.value, { stream: !done });
+            }
+
+            // Prosessoidaan täydet rivit
+            const lines = buffer.split('\n');
+            buffer = done ? '' : (lines.pop() || '');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6).trim();
+                if (data === '[DONE]') {
+                  done = true;
+                  break;
+                }
+                if (data) {
+                  try {
+                    const json = JSON.parse(data);
+                    const text = json.choices?.[0]?.delta?.content;
+                    if (text) {
+                      controller.enqueue(encoder.encode(text));
+                    }
+                  } catch (e) {
+                    // Skip invalid JSON
+                  }
+                }
+              }
+            }
+          }
+
+          // Flush remaining buffer
+          if (buffer && buffer.trim()) {
+            if (buffer.startsWith('data: ')) {
+              const data = buffer.slice(6).trim();
+              if (data && data !== '[DONE]') {
+                try {
+                  const json = JSON.parse(data);
+                  const text = json.choices?.[0]?.delta?.content;
+                  if (text) {
+                    controller.enqueue(encoder.encode(text));
+                  }
+                } catch (e) {
+                  // Skip invalid JSON
+                }
+              }
+            }
+          }
+        } catch (e) {
+          controller.error(e);
+        } finally {
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
