@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-// Allow streaming responses up to 30 seconds
-export const maxDuration = 30;
+// Allow streaming responses up to 60 seconds (increased due to slow Mistral API connections ~17s)
+export const maxDuration = 60;
 export const runtime = 'nodejs';
 
 // Environment variables will be validated in the request handler
@@ -32,6 +32,7 @@ async function getEmbedding(text: string, mistralApiKey: string) {
 }
 
 export async function POST(req: Request) {
+  const startTime = Date.now();
   try {
     // Initialize Supabase client with environment variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -233,6 +234,16 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
           let done = false;
           
           while (!done) {
+            // Check if we're approaching timeout (28 seconds = warning threshold)
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= 28000) {
+              // We're about to hit timeout, send warning and close gracefully
+              const warning = '\n\n⚠️ Vastaus katkesi aikakatkaisun vuoksi. Yritä uudelleen.';
+              controller.enqueue(encoder.encode(warning));
+              console.error(`⏱️ Stream timeout warning at ${elapsed}ms`);
+              break;
+            }
+            
             const result = await reader.read();
             done = result.done;
             
@@ -288,8 +299,19 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
           }
           
           // Stream complete
+          const totalTime = Date.now() - startTime;
+          console.log(`✅ Stream complete: ${totalTime}ms`);
         } catch (e) {
           console.error('Stream error:', e);
+          const errorTime = Date.now() - startTime;
+          console.error(`❌ Stream failed after ${errorTime}ms`);
+          
+          // If timeout, send user-friendly message
+          if (errorTime >= 28000) {
+            const timeoutMessage = '\n\n⚠️ Vastaus katkesi aikakatkaisun vuoksi. Yritä uudelleen.';
+            controller.enqueue(encoder.encode(timeoutMessage));
+          }
+          
           controller.error(e);
         } finally {
           controller.close();
