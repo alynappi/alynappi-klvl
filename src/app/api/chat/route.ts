@@ -78,6 +78,11 @@ Sävy: Ole ystävällinen ja eläväinen. Käytä emojeita (📅, 📍, ❄️) 
 Lähdeviitteet: [Kategoria] Nimi, s. X.
 Älä koskaan käännä julkaisujen nimiä.
 
+Jatkokysymykset (KRIITTINEN):
+Päätä JOKAINEN vastaus 2-3 aiheeseen liittyvään jatkokysymykseen muodossa: [[Kysymys?]]
+Esimerkki: [[Miten kuulokoje hankitaan?]] [[Mikä on kuulovammainen lapsi päivähoidossa?]]
+Kysymysten tulee olla lyhyitä (max 60 merkkiä) ja liittyä suoraan vastauksen aiheeseen.
+
 LÖYDETTY ARKISTOMATERIAALI:
 ${contextText || 'Ei suoria osumia arkistosta.'}
 `;
