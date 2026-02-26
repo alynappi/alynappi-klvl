@@ -169,23 +169,42 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
 
     // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
     const mistralStart = Date.now();
-    const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${MISTRAL_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'mistral-large-latest', // vaihda malli mistral-large-latest
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
-        max_tokens: 2000,    //nosta tätä tuotannossa 1000
-        temperature: 0.7,
-        frequency_penalty: 0.2,
-        presence_penalty: 0.1,
-        top_p: 1,
-        stream: true,
-      })
-    });
+    
+    // Add timeout to fail fast if Mistral is slow (20 seconds max - gives buffer before 30s Vercel limit)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 20000); // 20 second timeout - fails before 30s Vercel limit but allows slow connections
+    
+    let response;
+    try {
+      response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${MISTRAL_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'mistral-large-latest',
+          messages: [{ role: 'system', content: systemPrompt }, ...messages],
+          max_tokens: 1000,    // Reduced from 2000 to speed up generation
+          temperature: 0.7,
+          frequency_penalty: 0.2,
+          presence_penalty: 0.1,
+          top_p: 1,
+          stream: true,
+        })
+      });
+      clearTimeout(timeoutId);
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Mistral API connection timeout - request took longer than 20 seconds. Please try again.');
+      }
+      throw error;
+    }
+    
     console.log(`⏱️  Mistral API connection took: ${Date.now() - mistralStart}ms`);
 
     if (!response.ok) {
@@ -280,6 +299,13 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
           console.error('Stream error:', e);
           const errorTime = Date.now() - startTime;
           console.error(`❌ Stream failed after ${errorTime}ms, ${chunkCount} chunks sent`);
+          
+          // If stream was cut off due to timeout, send a message to user
+          if (errorTime >= 28000) {
+            const timeoutMessage = '\n\n⚠️ Vastaus katkesi aikakatkaisun vuoksi. Yritä uudelleen, seuraava pyyntö on nopeampi.';
+            controller.enqueue(encoder.encode(timeoutMessage));
+          }
+          
           controller.error(e);
         } finally {
           controller.close();
