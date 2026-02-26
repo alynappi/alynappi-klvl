@@ -197,20 +197,12 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
 
     // 4. MISTRAL KUTSU - Diagnostic version to find root cause of latency
     const mistralStart = Date.now();
+    console.log('🚀 Starting Mistral API connection...', {
+      timestamp: new Date().toISOString(),
+      vercelRegion: process.env.VERCEL_REGION || 'unknown',
+      nodeVersion: process.version
+    });
     
-    // Measure DNS resolution time (if possible)
-    const dnsStart = Date.now();
-    try {
-      // Force DNS lookup by resolving the hostname
-      const dns = await import('dns/promises');
-      await dns.lookup('api.mistral.ai').catch(() => {});
-    } catch (e) {
-      // DNS module might not be available, that's okay
-    }
-    const dnsTime = Date.now() - dnsStart;
-    
-    // Measure connection establishment time
-    const connectionStart = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
@@ -240,42 +232,39 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
       clearTimeout(timeoutId);
       
       const fetchTime = Date.now() - fetchStart;
-      const connectionTime = Date.now() - connectionStart;
       const totalTime = Date.now() - mistralStart;
       
       // Detailed diagnostics
       console.log('🔍 Mistral API Connection Diagnostics:', {
-        dnsResolution: `${dnsTime}ms`,
-        connectionEstablishment: `${connectionTime}ms`,
-        fetchTotal: `${fetchTime}ms`,
+        fetchTime: `${fetchTime}ms`,
         totalTime: `${totalTime}ms`,
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        statusText: response.statusText,
         vercelRegion: process.env.VERCEL_REGION || 'unknown',
-        nodeVersion: process.version
+        nodeVersion: process.version,
+        timestamp: new Date().toISOString()
       });
       
       if (totalTime > 2000) {
         console.warn(`⚠️  SLOW CONNECTION DETECTED: ${totalTime}ms (should be <2000ms)`);
-        console.warn(`   Breakdown: DNS=${dnsTime}ms, Connection=${connectionTime}ms, Fetch=${fetchTime}ms`);
-        console.warn(`   Possible causes:`);
-        console.warn(`   - DNS resolution slow: ${dnsTime > 100 ? 'YES' : 'NO'}`);
-        console.warn(`   - Connection establishment slow: ${connectionTime > 2000 ? 'YES' : 'NO'}`);
-        console.warn(`   - Vercel region: ${process.env.VERCEL_REGION || 'unknown'}`);
+        console.warn(`   Fetch time: ${fetchTime}ms`);
+        console.warn(`   Vercel region: ${process.env.VERCEL_REGION || 'unknown'}`);
+        console.warn(`   This indicates network latency between Vercel and Mistral API`);
       }
     } catch (error: any) {
       clearTimeout(timeoutId);
       const elapsed = Date.now() - mistralStart;
+      const elapsed = Date.now() - mistralStart;
       console.error('❌ Mistral API connection failed:', {
         error: error.message,
         elapsed: `${elapsed}ms`,
-        dnsTime: `${dnsTime}ms`,
-        connectionTime: `${Date.now() - connectionStart}ms`,
         name: error.name,
-        code: error.code
+        code: error.code,
+        vercelRegion: process.env.VERCEL_REGION || 'unknown',
+        timestamp: new Date().toISOString()
       });
       if (error.name === 'AbortError') {
-        throw new Error(`Mistral API connection timeout after ${elapsed}ms - DNS: ${dnsTime}ms, Connection: ${Date.now() - connectionStart}ms. This indicates a network/infrastructure issue.`);
+        throw new Error(`Mistral API connection timeout after ${elapsed}ms. Vercel region: ${process.env.VERCEL_REGION || 'unknown'}. This indicates a network/infrastructure issue between Vercel and Mistral API.`);
       }
       throw error;
     }
