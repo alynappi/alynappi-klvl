@@ -109,7 +109,11 @@ export async function POST(req: Request) {
       throw new Error('User question is empty');
     }
     
+    console.log('🔍 Getting embedding for question:', userQuestion.substring(0, 50) + '...');
+    const embeddingStart = Date.now();
     const queryEmbedding = await getEmbedding(userQuestion, MISTRAL_API_KEY);
+    const embeddingTime = Date.now() - embeddingStart;
+    console.log(`✅ Embedding received in ${embeddingTime}ms`);
 
     // 2. HAKU (match_threshold ja match_count säädettävissä tässä)
     console.log('Calling Supabase RPC with embedding length:', queryEmbedding.length);
