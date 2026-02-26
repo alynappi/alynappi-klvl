@@ -32,6 +32,15 @@ async function getEmbedding(text: string, mistralApiKey: string) {
 }
 
 export async function POST(req: Request) {
+  // CRITICAL: Log immediately to verify function is being called
+  console.log('🚨 POST /api/chat called at', new Date().toISOString());
+  console.log('🚨 Environment check:', {
+    hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+    hasSupabaseKey: !!process.env.SUPABASE_SECRET_KEY,
+    hasMistralKey: !!process.env.MISTRAL_API_KEY,
+    vercelRegion: process.env.VERCEL_REGION || 'unknown'
+  });
+  
   const startTime = Date.now();
   try {
     // Initialize Supabase client with environment variables
