@@ -16,11 +16,7 @@ async function getEmbedding(text: string, mistralApiKey: string) {
     headers: {
       'Authorization': `Bearer ${mistralApiKey}`,
       'Content-Type': 'application/json',
-      'Connection': 'keep-alive',
-      'Keep-Alive': 'timeout=5, max=1000',
     },
-    // @ts-ignore - Next.js fetch supports keepalive
-    keepalive: true,
     body: JSON.stringify({ model: 'mistral-embed', input: [text.replace(/\n/g, ' ')] })
   })
   
@@ -44,6 +40,7 @@ async function getEmbedding(text: string, mistralApiKey: string) {
 
 export async function POST(req: Request) {
   const startTime = Date.now();
+  console.log('📥 Chat API request received');
   try {
     // Initialize Supabase client with environment variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -68,6 +65,7 @@ export async function POST(req: Request) {
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     const body = await req.json();
+    console.log('📥 Request body parsed, messages count:', body.messages?.length || body.length || 0);
     
     // Handle different request formats from TextStreamChatTransport
     const rawMessages = body.messages || body;
@@ -84,8 +82,10 @@ export async function POST(req: Request) {
     }));
 
     const userQuestion = messages[messages.length - 1]?.content;
+    console.log('💬 User question:', userQuestion?.substring(0, 100) || 'empty');
     
     if (!userQuestion || !userQuestion.trim()) {
+      console.error('❌ User question is empty');
       throw new Error('User question is empty');
     }
     
@@ -181,7 +181,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     // 4. MISTRAL KUTSU - Optimized for fast connections
     const mistralStart = Date.now();
     
-    // Optimize fetch with connection keep-alive and proper headers
+    // Optimize fetch with proper timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
@@ -189,19 +189,13 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     
     let response;
     try {
-      // Use optimized fetch with keep-alive headers for connection reuse
-      // This helps with cold starts and reduces connection establishment time
       response = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${MISTRAL_API_KEY}`,
           'Content-Type': 'application/json',
-          'Connection': 'keep-alive', // Reuse connections to avoid TCP handshake delays
-          'Keep-Alive': 'timeout=5, max=1000',
         },
         signal: controller.signal,
-        // @ts-ignore - Next.js fetch supports keepalive option
-        keepalive: true, // Keep connection alive for reuse (reduces cold start latency)
         body: JSON.stringify({
           model: 'mistral-large-latest',
           messages: [{ role: 'system', content: systemPrompt }, ...messages],
