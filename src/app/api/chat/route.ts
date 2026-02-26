@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-// Allow streaming responses up to 30 seconds
-export const maxDuration = 30;
+// Allow streaming responses up to 60 seconds (increased from 30s to handle slow Mistral API connections)
+export const maxDuration = 60;
 export const runtime = 'nodejs';
 
 // Environment variables will be validated in the request handler
@@ -170,11 +170,11 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     // 4. MISTRAL KUTSU - Asetukset palautettu (temperature, max_tokens)
     const mistralStart = Date.now();
     
-    // Add timeout to fail fast if Mistral is slow (20 seconds max - gives buffer before 30s Vercel limit)
+    // Add timeout to fail fast if Mistral is slow (25 seconds max - gives buffer for streaming before 60s Vercel limit)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, 20000); // 20 second timeout - fails before 30s Vercel limit but allows slow connections
+    }, 25000); // 25 second timeout - fails fast to allow time for streaming before 60s Vercel limit
     
     let response;
     try {
@@ -188,7 +188,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
         body: JSON.stringify({
           model: 'mistral-large-latest',
           messages: [{ role: 'system', content: systemPrompt }, ...messages],
-          max_tokens: 1000,    // Reduced from 2000 to speed up generation
+          max_tokens: 1000,    // Restored to 1000 - now that we have 60s timeout
           temperature: 0.7,
           frequency_penalty: 0.2,
           presence_penalty: 0.1,
@@ -200,7 +200,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('Mistral API connection timeout - request took longer than 20 seconds. Please try again.');
+        throw new Error('Mistral API connection timeout - request took longer than 25 seconds. Please try again.');
       }
       throw error;
     }
@@ -219,11 +219,17 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
     let chunkCount = 0;
     let totalBytes = 0;
     
+    // Add streaming timeout - stop streaming if it takes too long (55 seconds total from start)
+    const streamTimeoutId = setTimeout(() => {
+      console.error('⏱️  Streaming timeout - stopping stream to prevent Vercel timeout');
+    }, 55000);
+    
     const stream = new ReadableStream({
       async start(controller) {
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         if (!reader) {
+          clearTimeout(streamTimeoutId);
           controller.close();
           return;
         }
@@ -233,6 +239,17 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
           let done = false;
           
           while (!done) {
+            // Check if we're approaching the 60s limit (stop at 58s to be safe)
+            const elapsed = Date.now() - startTime;
+            if (elapsed > 58000) {
+              console.warn(`⏱️  Approaching timeout (${elapsed}ms), closing stream early`);
+              clearTimeout(streamTimeoutId);
+              const timeoutMessage = '\n\n⚠️ Vastaus katkesi aikakatkaisun vuoksi. Yritä uudelleen.';
+              controller.enqueue(encoder.encode(timeoutMessage));
+              done = true;
+              break;
+            }
+            
             const result = await reader.read();
             done = result.done;
             
@@ -252,6 +269,7 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
                 const data = line.slice(6).trim();
                 if (data === '[DONE]') {
                   done = true;
+                  clearTimeout(streamTimeoutId);
                   const streamDuration = Date.now() - streamStartTime;
                   console.log(`✅ Stream complete: ${chunkCount} chunks, ${totalBytes} bytes, ${streamDuration}ms`);
                   break;
@@ -293,21 +311,24 @@ ${contextText || 'Ei suoria osumia arkistosta.'}
           }
           
           // Stream complete
+          clearTimeout(streamTimeoutId);
           const totalTime = Date.now() - startTime;
           console.log(`⏱️  Total request time: ${totalTime}ms`);
         } catch (e) {
+          clearTimeout(streamTimeoutId);
           console.error('Stream error:', e);
           const errorTime = Date.now() - startTime;
           console.error(`❌ Stream failed after ${errorTime}ms, ${chunkCount} chunks sent`);
           
           // If stream was cut off due to timeout, send a message to user
-          if (errorTime >= 28000) {
+          if (errorTime >= 58000) {
             const timeoutMessage = '\n\n⚠️ Vastaus katkesi aikakatkaisun vuoksi. Yritä uudelleen, seuraava pyyntö on nopeampi.';
             controller.enqueue(encoder.encode(timeoutMessage));
           }
           
           controller.error(e);
         } finally {
+          clearTimeout(streamTimeoutId);
           controller.close();
         }
       }
