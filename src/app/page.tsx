@@ -101,10 +101,10 @@ export default function ChatPage() {
         {messages.length === 0 && (
   <div className="text-center py-16 px-6 bg-white rounded-3xl shadow-sm border border-slate-100 mt-10">
     <h2 className="text-klvl-blue text-2xl font-bold mb-4">
-    Hei, olen ÄlyNappi, KLVL:n tekoälyavustaja. Olen vasta demoversio, mutta osaan jo vastata aika moneen kysymykseen.
+    Hei, olen ÄlyNappi, KLVL:n tekoälyavustaja. Olen vasta demoversio ja harjoittelen vielä.
     </h2>
     <p className="text-slate-600 mb-6 max-w-md mx-auto">
-      Kysy vapaasti kuulovammaan, edunvalvontaan tai perheiden tukeen liittyvistä aiheista. 
+      Kysy kuulovammaan, edunvalvontaan tai perheiden tukeen liittyvistä aiheista. 
     </p>
     <div className="flex flex-wrap justify-center gap-3 text-xs text-slate-500 italic">
       <span>• Nappi-lehdet</span>
